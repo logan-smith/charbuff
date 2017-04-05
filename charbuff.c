@@ -1,193 +1,213 @@
-#include <linux/module.h>
-#include <linux/kernel.h>
-#include <linux/fs.h>
-#include <asm/uaccess.h>
+/*
+Modified version of code provided by derekmolloy.ie
+*/
+#include <linux/init.h>           // Macros used to mark up functions e.g. __init __exit
+#include <linux/module.h>         // Core header for loading LKMs into the kernel
+#include <linux/device.h>         // Header to support the kernel Driver Model
+#include <linux/kernel.h>         // Contains types, macros, functions for the kernel
+#include <linux/fs.h>             // Header for the Linux file system support
+#include <asm/uaccess.h>          // Required for the copy to user function
+#define  DEVICE_NAME "charbuff"    ///< The device will appear at /dev/charbuff using this value
+#define  CLASS_NAME  "charb"        ///< The device class -- this is a character device driver
 
-int init_module(void);
-void cleanup_module(void);
-// Is this how you prototype these?
-struct node *create(int data);
-struct node *pop();
+MODULE_LICENSE("GPL");            ///< The license type -- this affects available functionality
+MODULE_AUTHOR("COP 4600-17 Group 12");    ///< The author -- visible when you use modinfo
+MODULE_DESCRIPTION("A simple Linux char driver");  ///< The description -- see modinfo
+MODULE_VERSION("0.1");            ///< A version number to inform users
 
-static int device_open(struct inode *, struct file *);
-static int device_release(struct inode *, struct file *);
-static ssize_t device_read(struct file*, char *, size_t, loff_t *);
-static ssize_t device_write(struct file*, const char *, size_t, loff_t *);
+static int    majorNumber;                  ///< Stores the device number -- determined automatically
+static char   message[1024] = {0};           ///< Memory for the string that is passed from userspace
+static char   charBuffer[1025] = {0};
+int charBuffLen = 0;
+static short  size_of_message;              ///< Used to remember the size of the string stored
+static int    numberOpens = 0;              ///< Counts the number of times the device is opened
+static struct class*  charbuffClass  = NULL; ///< The device-driver class struct pointer
+static struct device* charbuffDevice = NULL; ///< The device-driver device struct pointer
 
-#define SUCCESS 0
-#define DEVICE_NAME "charbuff" // The name that will be in /proc/devices
-#define BUF_LEN 80 // Max length, should be 1KB?
-// Linked list for buffer queue struct????
+// The prototype functions for the character driver -- must come before the struct definition
+static int     dev_open(struct inode *, struct file *);
+static int     dev_release(struct inode *, struct file *);
+static ssize_t dev_read(struct file *, char *, size_t, loff_t *);
+static ssize_t dev_write(struct file *, const char *, size_t, loff_t *);
 
-struct file_operations fops = {
-	.read = device_read, 
-	.write = device_write,
-	.open = device_open,
-	.release = device_release
-};
-
-struct node
-{
-	int data;
-	node *next;
-};
-
-node *front = NULL;
-node *rear = NULL;
-
-node *create(int data)
-{
-	temp = (struct node *)malloc(sizeof(struct node));
-	temp->data = data;
-	temp->next = null;
-	return temp; 
-}
-
-void insert(int item)
-{
-	struct node *newnode = create(item);
-
-	if (front == NULL)
-	{
-		front = rear = newnode;
-	}
-	else
-	{
-		rear->next = newnode;
-		rear = newnode;
-	}
-}
-
-node *pop()
-{
-	struct node *keep = front;
-	struct node *temp = front;
-
-	// Queue is empty so just leave
-	if (front == NULL)
-	{
-		return;
-	}
-	// Delete the top
-	else
-	{
-		front = front->next;
-		if(front == NULL)
-			rear = NULL;
-		free(temp);
-		return(keep);
-	}
-}
-
-
-static int Major;
-// So device isn't opened more than once.
-static int Device_Open = 0; 
-// msg device will provide.
-static char msg[BUF_LEN];
-
-int init_module(void)
-{
-	Major = register_chrdev(0, DEVICE_NAME, &fops);
-
-	if (Major < 0 )
-	{
-		printk(KERN_ALERT "Registering device failed\n");
-		return Major;
-	}
-
-	printk(KERN_INFO "I was assigned major number %d\n", Major);
-	printk(KERN_INFO "Installing module named %s.\n", DEVICE_NAME);
-//major is the major number we want
-// ^ Set to 0 so it gives a random one
-//temp is the name that will show up in /proc/devices
-//
-	return 0;
-}
-
-void cleanup_module(void) 
-{
-	printk(KERN_INFO "Removing module.\n");
-	int ret = unregister_chrdev(Major, DEVICE_NAME);
-	if (ret < 0)
-		printk(KERN_ALERT "Error in ungregistering\n");
-}
-
-//Sample code 
-//Called when a process tries to open the device file
-// like "cat /dev/mycharfile"
-static int device_open(struct inode *inode, struct file *file)
-{
-	printk(KERN_INFO "Device Opened\n");
-
-	// This is all sample code stuff
-	// I don't think we need to keep track of any of this stuff.
-
-        static int counter = 0;
-        if (Device_Open)
-                return −EBUSY;
-        Device_Open++;
-        sprintf(msg, "I already told you %d times Hello world!\n", counter++);
-        msg_Ptr = msg;
-        try_module_get(THIS_MODULE);
-        return SUCCESS;
-}
-
-/* 
- * Called when a process closes the device file.
+/** @brief Devices are represented as file structure in the kernel. The file_operations structure from
+ *  /linux/fs.h lists the callback functions that you wish to associated with your file operations
+ *  using a C99 syntax structure. char devices usually implement open, read, write and release calls
  */
-static int device_release(struct inode *inode, struct file *file)
+static struct file_operations fops =
 {
-	printk(KERN_INFO "Device Closed\n");
+   .open = dev_open,
+   .read = dev_read,
+   .write = dev_write,
+   .release = dev_release,
+};
 
-	// Again I dont know if we need this stuff
+/** @brief The LKM initialization function
+ *  The static keyword restricts the visibility of the function to within this C file. The __init
+ *  macro means that for a built-in driver (not a LKM) the function is only used at initialization
+ *  time and that it can be discarded and its memory freed up after that point.
+ *  @return returns 0 if successful
+ */
+static int __init charbuff_init(void){
+   printk(KERN_INFO "charbuff: Initializing the charbuff LKM\n");
 
+   // Try to dynamically allocate a major number for the device -- more difficult but worth it
+   majorNumber = register_chrdev(0, DEVICE_NAME, &fops);
+   if (majorNumber<0){
+      printk(KERN_ALERT "charbuff failed to register a major number\n");
+      return majorNumber;
+   }
+   printk(KERN_INFO "charbuff: registered correctly with major number %d\n", majorNumber);
 
-    Device_Open−−;          /* We're now ready for our next caller */
-        /* 
-         * Decrement the usage count, or else once you opened the file, you'll
-         * never get get rid of the module. 
-         */
-    module_put(THIS_MODULE);
-    return 0;
+   // Register the device class
+   charbuffClass = class_create(THIS_MODULE, CLASS_NAME);
+   if (IS_ERR(charbuffClass)){                // Check for error and clean up if there is
+      unregister_chrdev(majorNumber, DEVICE_NAME);
+      printk(KERN_ALERT "Failed to register device class\n");
+      return PTR_ERR(charbuffClass);          // Correct way to return an error on a pointer
+   }
+   printk(KERN_INFO "charbuff: device class registered correctly\n");
+
+   // Register the device driver
+   charbuffDevice = device_create(charbuffClass, NULL, MKDEV(majorNumber, 0), NULL, DEVICE_NAME);
+   if (IS_ERR(charbuffDevice)){               // Clean up if there is an error
+      class_destroy(charbuffClass);           // Repeated code but the alternative is goto statements
+      unregister_chrdev(majorNumber, DEVICE_NAME);
+      printk(KERN_ALERT "Failed to create the device\n");
+      return PTR_ERR(charbuffDevice);
+   }
+   printk(KERN_INFO "charbuff: device class created correctly\n"); // Made it! device was initialized
+   return 0;
 }
 
-// Called when a process, which has already opened the dev file, 
-// attempts to read from it
-//
-// I don't really understand the buffer or how the user reads, 
-// but its something to go off of.
-static ssize_t device_read(struct file *filp,   /* see include/linux/fs.h   */
-                           char *buffer,        /* buffer to fill with data */
-                           size_t length,       /* length of the buffer     */
-                           loff_t * offset)
-{
-	printk(KERN_INFO "Device Read\n");
+/** @brief The LKM cleanup function
+ *  Similar to the initialization function, it is static. The __exit macro notifies that if this
+ *  code is used for a built-in driver (not a LKM) that this function is not required.
+ */
+static void __exit charbuff_exit(void){
+   device_destroy(charbuffClass, MKDEV(majorNumber, 0));     // remove the device
+   class_unregister(charbuffClass);                          // unregister the device class
+   class_destroy(charbuffClass);                             // remove the device class
+   unregister_chrdev(majorNumber, DEVICE_NAME);             // unregister the major number
+   printk(KERN_INFO "charbuff: Goodbye from the LKM!\n");
+}
 
-	// Pop the queue in here
+/** @brief The device open function that is called each time the device is opened
+ *  This will only increment the numberOpens counter in this case.
+ *  @param inodep A pointer to an inode object (defined in linux/fs.h)
+ *  @param filep A pointer to a file object (defined in linux/fs.h)
+ */
+static int dev_open(struct inode *inodep, struct file *filep){
+   numberOpens++;
+   printk(KERN_INFO "charbuff: Device has been opened %d time(s)\n", numberOpens);
+   return 0;
+}
 
-	struct node *temp = pop(); 
-
+/** @brief This function is called whenever device is being read from user space i.e. data is
+ *  being sent from the device to the user. In this case is uses the copy_to_user() function to
+ *  send the buffer string to the user and captures any errors.
+ *  @param filep A pointer to a file object (defined in linux/fs.h)
+ *  @param buffer The pointer to the buffer to which this function writes the data
+ *  @param len The length of the b
+ *  @param offset The offset if required
+ */
+static ssize_t dev_read(struct file *filep, char *buffer, size_t len, loff_t *offset){
+   int error_count = 0;
+   // copy_to_user has the format ( * to, *from, size) and returns 0 on success
+   //error_count = copy_to_user(buffer, message, size_of_message);
+	int length = (int) len;
+	char *temp;
+	//requested length is less than or equal to total in buffer
+	if(length <= charBuffLen)
+	{
+		error_count = copy_to_user(buffer, charBuffer, length);
+		//strcpy(temp, charBuffer);
+		//strncpy(temp, charBuffer + length, charBuffLen - length);
+		temp = charBuffer + length;
+		strcpy(charBuffer,temp);
+		charBuffLen -= length;
+	}
+	//if requested length is greater than total buffer
+	else
+	{
+		error_count = copy_to_user(buffer, charBuffer, charBuffLen);
+		//strcpy(charBuffer, '');
+		charBuffLen = 0;
+	}
 	
-
-	// Should we use put_user or copy_to_user idk idk idk
-	// 
-	// How does this work I have no idea.
-	put_user(temp->data, buffer++);
-
-	// What should be returned?
-    return;
+   if (error_count==0){            // if true then have success
+      printk(KERN_INFO "charbuff: Sent %d characters to the user\n", size_of_message);
+      return (size_of_message=0);  // clear the position to the start and return 0
+   }
+   else {
+      printk(KERN_INFO "charbuff: Failed to send %d characters to the user\n", error_count);
+      return -EFAULT;              // Failed -- return a bad address message (i.e. -14)
+   }
 }
 
-static ssize_t device_write(struct file *filp, const char *buff, size_t len, loff_t * off)
-{
-	// Add to queue in here.
-
-	printk(KERN_INFO "Device Written To\n");
-
-	insert(buff);
-
-
-	// idk what this does.
-	return -EINVAL;
+/** @brief This function is called whenever the device is being written to from user space i.e.
+ *  data is sent to the device from the user. The data is copied to the message[] array in this
+ *  LKM using the sprintf() function along with the length of the string.
+ *  @param filep A pointer to a file object
+ *  @param buffer The buffer to that contains the string to write to the device
+ *  @param len The length of the array of data that is being passed in the const char buffer
+ *  @param offset The offset if required
+ */
+static ssize_t dev_write(struct file *filep, const char *buffer, size_t len, loff_t *offset){
+   sprintf(message, "%s", buffer);   // appending received string with its length
+   size_of_message = strlen(message);                 // store the length of the stored message
+   // if adding new string exceeds buffer size, cut it
+	char temp[1024];   
+	if(size_of_message + charBuffLen > 1024)
+   {
+   		int lenToWrite = 1024-charBuffLen;
+		strncpy(temp, message, lenToWrite);
+   		if(charBuffLen == 0)
+		{
+			charBuffer[0] = '\0';
+			strcpy(charBuffer, temp);
+			//charBuffLen += size_of_message;
+		}
+		
+		else
+		{
+			strcat(charBuffer, temp);
+			strcat(charBuffer, '\0');
+		}
+		charBuffLen += lenToWrite;
+   }
+   //if new string fits, add it as is
+   else
+   {
+   		if(charBuffLen == 0)
+		{
+			charBuffer[0] = '\0';
+			strcpy(charBuffer, message);
+			charBuffLen += size_of_message;
+		}
+		else if(charBuffLen > 0)
+		{
+			strcat(charBuffer, message);
+			charBuffLen += size_of_message;
+		}
+   }
+   printk(KERN_INFO "charbuff: Received %zu characters from the user\n", len);
+   return len;
 }
+
+/** @brief The device release function that is called whenever the device is closed/released by
+ *  the userspace program
+ *  @param inodep A pointer to an inode object (defined in linux/fs.h)
+ *  @param filep A pointer to a file object (defined in linux/fs.h)
+ */
+static int dev_release(struct inode *inodep, struct file *filep){
+   printk(KERN_INFO "charbuff: Device successfully closed\n");
+   return 0;
+}
+
+/** @brief A module must use the module_init() module_exit() macros from linux/init.h, which
+ *  identify the initialization function at insertion time and the cleanup function (as
+ *  listed above)
+ */
+module_init(charbuff_init);
+module_exit(charbuff_exit);
