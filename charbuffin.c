@@ -6,7 +6,9 @@ Modified version of code provided by derekmolloy.ie
 #include <linux/device.h>         // Header to support the kernel Driver Model
 #include <linux/kernel.h>         // Contains types, macros, functions for the kernel
 #include <linux/fs.h>             // Header for the Linux file system support
+#include <linux/mutex.h>          // For Mutex functions
 #include <asm/uaccess.h>          // Required for the copy to user function
+//Does this get renamed to charbuffin?
 #define  DEVICE_NAME "charbuff"    ///< The device will appear at /dev/charbuff using this value
 #define  CLASS_NAME  "charb"        ///< The device class -- this is a character device driver
 
@@ -14,6 +16,7 @@ MODULE_LICENSE("GPL");            ///< The license type -- this affects availabl
 MODULE_AUTHOR("COP 4600-17 Group 12");    ///< The author -- visible when you use modinfo
 MODULE_DESCRIPTION("A simple Linux char driver");  ///< The description -- see modinfo
 MODULE_VERSION("0.1");            ///< A version number to inform users
+
 
 static int    majorNumber;                  ///< Stores the device number -- determined automatically
 static char   message[1024] = {0};           ///< Memory for the string that is passed from userspace
@@ -23,6 +26,9 @@ static short  size_of_message;              ///< Used to remember the size of th
 static int    numberOpens = 0;              ///< Counts the number of times the device is opened
 static struct class*  charbuffClass  = NULL; ///< The device-driver class struct pointer
 static struct device* charbuffDevice = NULL; ///< The device-driver device struct pointer
+
+// Declare a new mutex
+static DEFINE_MUTEX(charbuff_mutex);
 
 // The prototype functions for the character driver -- must come before the struct definition
 static int     dev_open(struct inode *, struct file *);
@@ -77,6 +83,10 @@ static int __init charbuff_init(void){
       return PTR_ERR(charbuffDevice);
    }
    printk(KERN_INFO "charbuff: device class created correctly\n"); // Made it! device was initialized
+   
+   // Initialize the mutex
+   mutex_init(&charbuff_mutex);
+
    return 0;
 }
 
@@ -85,6 +95,9 @@ static int __init charbuff_init(void){
  *  code is used for a built-in driver (not a LKM) that this function is not required.
  */
 static void __exit charbuff_exit(void){
+   // Destroy the mutex we created
+   mutex_destroy(&charbuff_mutex);
+
    device_destroy(charbuffClass, MKDEV(majorNumber, 0));     // remove the device
    class_unregister(charbuffClass);                          // unregister the device class
    class_destroy(charbuffClass);                             // remove the device class
@@ -98,6 +111,15 @@ static void __exit charbuff_exit(void){
  *  @param filep A pointer to a file object (defined in linux/fs.h)
  */
 static int dev_open(struct inode *inodep, struct file *filep){
+
+// Try to aquire the mutex
+// Returns 0 if it's already held
+   if(!mutex_trylock(&charbuff_mutex))
+   {
+      printk(KERN_ALERT "charbuff: Device in use by another process");
+      return -EBUSY;
+   }
+
    numberOpens++;
    printk(KERN_INFO "charbuff: Device has been opened %d time(s)\n", numberOpens);
    return 0;
@@ -201,6 +223,10 @@ static ssize_t dev_write(struct file *filep, const char *buffer, size_t len, lof
  *  @param filep A pointer to a file object (defined in linux/fs.h)
  */
 static int dev_release(struct inode *inodep, struct file *filep){
+
+   // Release the mutex
+   mutex_unlock(&charbuff_mutex);
+
    printk(KERN_INFO "charbuff: Device successfully closed\n");
    return 0;
 }
