@@ -8,7 +8,6 @@ Modified version of code provided by derekmolloy.ie
 #include <linux/fs.h>             // Header for the Linux file system support
 #include <linux/mutex.h>          // For Mutex functions
 #include <asm/uaccess.h>          // Required for the copy to user function
-//Does this get renamed to charbuffin?
 #define  DEVICE_NAME "charbuffin"    ///< The device will appear at /dev/charbuff using this value
 #define  CLASS_NAME  "charbin"        ///< The device class -- this is a character device driver
 
@@ -21,8 +20,7 @@ MODULE_VERSION("0.1");            ///< A version number to inform users
 static int    majorNumber;                  ///< Stores the device number -- determined automatically
 static char   message[1024] = {0};           ///< Memory for the string that is passed from userspace
 static char   charBuffer[1025] = {0};
-// I think both modules can use this???
-// extern char charBuffer[1025] = {0};
+
 EXPORT_SYMBOL(charBuffer);
 
 int charBuffLen = 0;
@@ -33,13 +31,13 @@ static int    numberOpens = 0;              ///< Counts the number of times the 
 static struct class*  charbuffClass  = NULL; ///< The device-driver class struct pointer
 static struct device* charbuffDevice = NULL; ///< The device-driver device struct pointer
 
-// Declare a new mutex
+// Declare a new mutex and export it globally
 static DEFINE_MUTEX(charbuff_mutex);
+EXPORT_SYMBOL(charbuff_mutex);
 
 // The prototype functions for the character driver -- must come before the struct definition
 static int     dev_open(struct inode *, struct file *);
 static int     dev_release(struct inode *, struct file *);
-// static ssize_t dev_read(struct file *, char *, size_t, loff_t *);
 static ssize_t dev_write(struct file *, const char *, size_t, loff_t *);
 
 /** @brief Devices are represented as file structure in the kernel. The file_operations structure from
@@ -49,7 +47,6 @@ static ssize_t dev_write(struct file *, const char *, size_t, loff_t *);
 static struct file_operations fops =
 {
    .open = dev_open,
-   // .read = dev_read,
    .write = dev_write,
    .release = dev_release,
 };
@@ -62,6 +59,9 @@ static struct file_operations fops =
  */
 static int __init charbuff_init(void){
    printk(KERN_INFO "charbuff: Initializing the charbuff LKM\n");
+
+   // Initialize the mutex
+   mutex_init(&charbuff_mutex);
 
    // Try to dynamically allocate a major number for the device -- more difficult but worth it
    majorNumber = register_chrdev(0, DEVICE_NAME, &fops);
@@ -89,9 +89,6 @@ static int __init charbuff_init(void){
       return PTR_ERR(charbuffDevice);
    }
    printk(KERN_INFO "charbuff: device class created correctly\n"); // Made it! device was initialized
-   
-   // Initialize the mutex
-   mutex_init(&charbuff_mutex);
 
    return 0;
 }
@@ -117,61 +114,10 @@ static void __exit charbuff_exit(void){
  *  @param filep A pointer to a file object (defined in linux/fs.h)
  */
 static int dev_open(struct inode *inodep, struct file *filep){
-
-// Try to aquire the mutex
-// Returns 0 if it's already held
-   if(!mutex_trylock(&charbuff_mutex))
-   {
-      printk(KERN_ALERT "charbuff: Device in use by another process");
-      return -EBUSY;
-   }
-
    numberOpens++;
    printk(KERN_INFO "charbuff: Device has been opened %d time(s)\n", numberOpens);
    return 0;
 }
-
-/** @brief This function is called whenever device is being read from user space i.e. data is
- *  being sent from the device to the user. In this case is uses the copy_to_user() function to
- *  send the buffer string to the user and captures any errors.
- *  @param filep A pointer to a file object (defined in linux/fs.h)
- *  @param buffer The pointer to the buffer to which this function writes the data
- *  @param len The length of the b
- *  @param offset The offset if required
- */
-// static ssize_t dev_read(struct file *filep, char *buffer, size_t len, loff_t *offset){
-//    int error_count = 0;
-//    // copy_to_user has the format ( * to, *from, size) and returns 0 on success
-//    //error_count = copy_to_user(buffer, message, size_of_message);
-// 	int length = (int) len;
-// 	char *temp;
-// 	//requested length is less than or equal to total in buffer
-// 	if(length <= charBuffLen)
-// 	{
-// 		error_count = copy_to_user(buffer, charBuffer, length);
-// 		//strcpy(temp, charBuffer);
-// 		//strncpy(temp, charBuffer + length, charBuffLen - length);
-// 		temp = charBuffer + length;
-// 		strcpy(charBuffer,temp);
-// 		charBuffLen -= length;
-// 	}
-// 	//if requested length is greater than total buffer
-// 	else
-// 	{
-// 		error_count = copy_to_user(buffer, charBuffer, charBuffLen);
-// 		//strcpy(charBuffer, '');
-// 		charBuffLen = 0;
-// 	}
-	
-//    if (error_count==0){            // if true then have success
-//       printk(KERN_INFO "charbuff: Sent %d characters to the user\n", size_of_message);
-//       return (size_of_message=0);  // clear the position to the start and return 0
-//    }
-//    else {
-//       printk(KERN_INFO "charbuff: Failed to send %d characters to the user\n", error_count);
-//       return -EFAULT;              // Failed -- return a bad address message (i.e. -14)
-//    }
-// }
 
 /** @brief This function is called whenever the device is being written to from user space i.e.
  *  data is sent to the device from the user. The data is copied to the message[] array in this
@@ -182,6 +128,18 @@ static int dev_open(struct inode *inodep, struct file *filep){
  *  @param offset The offset if required
  */
 static ssize_t dev_write(struct file *filep, const char *buffer, size_t len, loff_t *offset){
+
+   // Try to aquire the mutex
+   // Returns 0 if it's already held
+   // Locks the mutex if it's available
+   if(!mutex_trylock(&charbuff_mutex))
+   {
+      printk(KERN_ALERT "charbuffin: Device in use by another process");
+      return -EBUSY;
+   }
+   printk(KERN_INFO "charbuffin: Mutex locked\n");
+
+
    sprintf(message, "%s", buffer);   // appending received string with its length
    size_of_message = strlen(message);                 // store the length of the stored message
    // if adding new string exceeds buffer size, cut it
@@ -194,7 +152,6 @@ static ssize_t dev_write(struct file *filep, const char *buffer, size_t len, lof
 		{
 			charBuffer[0] = '\0';
 			strcpy(charBuffer, temp);
-			//charBuffLen += size_of_message;
 		}
 		
 		else
@@ -220,6 +177,11 @@ static ssize_t dev_write(struct file *filep, const char *buffer, size_t len, lof
 		}
    }
    printk(KERN_INFO "charbuff: Received %zu characters from the user\n", len);
+
+   // Unlock the mutex when you're done writing
+   mutex_unlock(&charbuff_mutex);
+   printk(KERN_INFO "charbuffin: Mutex unlocked\n");
+
    return len;
 }
 
@@ -229,10 +191,6 @@ static ssize_t dev_write(struct file *filep, const char *buffer, size_t len, lof
  *  @param filep A pointer to a file object (defined in linux/fs.h)
  */
 static int dev_release(struct inode *inodep, struct file *filep){
-
-   // Release the mutex
-   mutex_unlock(&charbuff_mutex);
-
    printk(KERN_INFO "charbuff: Device successfully closed\n");
    return 0;
 }
