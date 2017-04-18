@@ -1,0 +1,1 @@
+cmd_/home/logan/sandbox/charbuff/charbuffin.ko := ld -r -m elf_i386 -T ./scripts/module-common.lds --build-id  -o /home/logan/sandbox/charbuff/charbuffin.ko /home/logan/sandbox/charbuff/charbuffin.o /home/logan/sandbox/charbuff/charbuffin.mod.o

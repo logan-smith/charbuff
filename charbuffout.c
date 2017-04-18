@@ -9,8 +9,8 @@ Modified version of code provided by derekmolloy.ie
 #include <linux/mutex.h>          // For Mutex functions
 #include <asm/uaccess.h>          // Required for the copy to user function
 //Does this get renamed to charbuffin?
-#define  DEVICE_NAME "charbuff"    ///< The device will appear at /dev/charbuff using this value
-#define  CLASS_NAME  "charb"        ///< The device class -- this is a character device driver
+#define  DEVICE_NAME "charbuffout"    ///< The device will appear at /dev/charbuff using this value
+#define  CLASS_NAME  "charbout"        ///< The device class -- this is a character device driver
 
 MODULE_LICENSE("GPL");            ///< The license type -- this affects available functionality
 MODULE_AUTHOR("COP 4600-17 Group 12");    ///< The author -- visible when you use modinfo
@@ -20,8 +20,11 @@ MODULE_VERSION("0.1");            ///< A version number to inform users
 
 static int    majorNumber;                  ///< Stores the device number -- determined automatically
 static char   message[1024] = {0};           ///< Memory for the string that is passed from userspace
-static char   charBuffer[1025] = {0};
-int charBuffLen = 0;
+// static char   charBuffer[1025] = {0};
+
+extern char charBuffer[1025];
+extern int charBuffLen;
+// int charBuffLen = 0;
 static short  size_of_message;              ///< Used to remember the size of the string stored
 static int    numberOpens = 0;              ///< Counts the number of times the device is opened
 static struct class*  charbuffClass  = NULL; ///< The device-driver class struct pointer
@@ -34,7 +37,7 @@ static DEFINE_MUTEX(charbuff_mutex);
 static int     dev_open(struct inode *, struct file *);
 static int     dev_release(struct inode *, struct file *);
 static ssize_t dev_read(struct file *, char *, size_t, loff_t *);
-static ssize_t dev_write(struct file *, const char *, size_t, loff_t *);
+// static ssize_t dev_write(struct file *, const char *, size_t, loff_t *);
 
 /** @brief Devices are represented as file structure in the kernel. The file_operations structure from
  *  /linux/fs.h lists the callback functions that you wish to associated with your file operations
@@ -44,7 +47,7 @@ static struct file_operations fops =
 {
    .open = dev_open,
    .read = dev_read,
-   .write = dev_write,
+   // .write = dev_write,
    .release = dev_release,
 };
 
@@ -175,47 +178,47 @@ static ssize_t dev_read(struct file *filep, char *buffer, size_t len, loff_t *of
  *  @param len The length of the array of data that is being passed in the const char buffer
  *  @param offset The offset if required
  */
-static ssize_t dev_write(struct file *filep, const char *buffer, size_t len, loff_t *offset){
-   sprintf(message, "%s", buffer);   // appending received string with its length
-   size_of_message = strlen(message);                 // store the length of the stored message
-   // if adding new string exceeds buffer size, cut it
-	char temp[1024];   
-	if(size_of_message + charBuffLen > 1024)
-   {
-   		int lenToWrite = 1024-charBuffLen;
-		strncpy(temp, message, lenToWrite);
-   		if(charBuffLen == 0)
-		{
-			charBuffer[0] = '\0';
-			strcpy(charBuffer, temp);
-			//charBuffLen += size_of_message;
-		}
+// static ssize_t dev_write(struct file *filep, const char *buffer, size_t len, loff_t *offset){
+//    sprintf(message, "%s", buffer);   // appending received string with its length
+//    size_of_message = strlen(message);                 // store the length of the stored message
+//    // if adding new string exceeds buffer size, cut it
+// 	char temp[1024];   
+// 	if(size_of_message + charBuffLen > 1024)
+//    {
+//    		int lenToWrite = 1024-charBuffLen;
+// 		strncpy(temp, message, lenToWrite);
+//    		if(charBuffLen == 0)
+// 		{
+// 			charBuffer[0] = '\0';
+// 			strcpy(charBuffer, temp);
+// 			//charBuffLen += size_of_message;
+// 		}
 		
-		else
-		{
-			strcat(charBuffer, temp);
-			strcat(charBuffer, '\0');
-		}
-		charBuffLen += lenToWrite;
-   }
-   //if new string fits, add it as is
-   else
-   {
-   		if(charBuffLen == 0)
-		{
-			charBuffer[0] = '\0';
-			strcpy(charBuffer, message);
-			charBuffLen += size_of_message;
-		}
-		else if(charBuffLen > 0)
-		{
-			strcat(charBuffer, message);
-			charBuffLen += size_of_message;
-		}
-   }
-   printk(KERN_INFO "charbuff: Received %zu characters from the user\n", len);
-   return len;
-}
+// 		else
+// 		{
+// 			strcat(charBuffer, temp);
+// 			strcat(charBuffer, '\0');
+// 		}
+// 		charBuffLen += lenToWrite;
+//    }
+//    //if new string fits, add it as is
+//    else
+//    {
+//    		if(charBuffLen == 0)
+// 		{
+// 			charBuffer[0] = '\0';
+// 			strcpy(charBuffer, message);
+// 			charBuffLen += size_of_message;
+// 		}
+// 		else if(charBuffLen > 0)
+// 		{
+// 			strcat(charBuffer, message);
+// 			charBuffLen += size_of_message;
+// 		}
+//    }
+//    printk(KERN_INFO "charbuff: Received %zu characters from the user\n", len);
+//    return len;
+// }
 
 /** @brief The device release function that is called whenever the device is closed/released by
  *  the userspace program

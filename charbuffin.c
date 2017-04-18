@@ -9,8 +9,8 @@ Modified version of code provided by derekmolloy.ie
 #include <linux/mutex.h>          // For Mutex functions
 #include <asm/uaccess.h>          // Required for the copy to user function
 //Does this get renamed to charbuffin?
-#define  DEVICE_NAME "charbuff"    ///< The device will appear at /dev/charbuff using this value
-#define  CLASS_NAME  "charb"        ///< The device class -- this is a character device driver
+#define  DEVICE_NAME "charbuffin"    ///< The device will appear at /dev/charbuff using this value
+#define  CLASS_NAME  "charbin"        ///< The device class -- this is a character device driver
 
 MODULE_LICENSE("GPL");            ///< The license type -- this affects available functionality
 MODULE_AUTHOR("COP 4600-17 Group 12");    ///< The author -- visible when you use modinfo
@@ -21,7 +21,13 @@ MODULE_VERSION("0.1");            ///< A version number to inform users
 static int    majorNumber;                  ///< Stores the device number -- determined automatically
 static char   message[1024] = {0};           ///< Memory for the string that is passed from userspace
 static char   charBuffer[1025] = {0};
+// I think both modules can use this???
+// extern char charBuffer[1025] = {0};
+EXPORT_SYMBOL(charBuffer);
+
 int charBuffLen = 0;
+EXPORT_SYMBOL(charBuffLen);
+
 static short  size_of_message;              ///< Used to remember the size of the string stored
 static int    numberOpens = 0;              ///< Counts the number of times the device is opened
 static struct class*  charbuffClass  = NULL; ///< The device-driver class struct pointer
@@ -33,7 +39,7 @@ static DEFINE_MUTEX(charbuff_mutex);
 // The prototype functions for the character driver -- must come before the struct definition
 static int     dev_open(struct inode *, struct file *);
 static int     dev_release(struct inode *, struct file *);
-static ssize_t dev_read(struct file *, char *, size_t, loff_t *);
+// static ssize_t dev_read(struct file *, char *, size_t, loff_t *);
 static ssize_t dev_write(struct file *, const char *, size_t, loff_t *);
 
 /** @brief Devices are represented as file structure in the kernel. The file_operations structure from
@@ -43,7 +49,7 @@ static ssize_t dev_write(struct file *, const char *, size_t, loff_t *);
 static struct file_operations fops =
 {
    .open = dev_open,
-   .read = dev_read,
+   // .read = dev_read,
    .write = dev_write,
    .release = dev_release,
 };
@@ -133,39 +139,39 @@ static int dev_open(struct inode *inodep, struct file *filep){
  *  @param len The length of the b
  *  @param offset The offset if required
  */
-static ssize_t dev_read(struct file *filep, char *buffer, size_t len, loff_t *offset){
-   int error_count = 0;
-   // copy_to_user has the format ( * to, *from, size) and returns 0 on success
-   //error_count = copy_to_user(buffer, message, size_of_message);
-	int length = (int) len;
-	char *temp;
-	//requested length is less than or equal to total in buffer
-	if(length <= charBuffLen)
-	{
-		error_count = copy_to_user(buffer, charBuffer, length);
-		//strcpy(temp, charBuffer);
-		//strncpy(temp, charBuffer + length, charBuffLen - length);
-		temp = charBuffer + length;
-		strcpy(charBuffer,temp);
-		charBuffLen -= length;
-	}
-	//if requested length is greater than total buffer
-	else
-	{
-		error_count = copy_to_user(buffer, charBuffer, charBuffLen);
-		//strcpy(charBuffer, '');
-		charBuffLen = 0;
-	}
+// static ssize_t dev_read(struct file *filep, char *buffer, size_t len, loff_t *offset){
+//    int error_count = 0;
+//    // copy_to_user has the format ( * to, *from, size) and returns 0 on success
+//    //error_count = copy_to_user(buffer, message, size_of_message);
+// 	int length = (int) len;
+// 	char *temp;
+// 	//requested length is less than or equal to total in buffer
+// 	if(length <= charBuffLen)
+// 	{
+// 		error_count = copy_to_user(buffer, charBuffer, length);
+// 		//strcpy(temp, charBuffer);
+// 		//strncpy(temp, charBuffer + length, charBuffLen - length);
+// 		temp = charBuffer + length;
+// 		strcpy(charBuffer,temp);
+// 		charBuffLen -= length;
+// 	}
+// 	//if requested length is greater than total buffer
+// 	else
+// 	{
+// 		error_count = copy_to_user(buffer, charBuffer, charBuffLen);
+// 		//strcpy(charBuffer, '');
+// 		charBuffLen = 0;
+// 	}
 	
-   if (error_count==0){            // if true then have success
-      printk(KERN_INFO "charbuff: Sent %d characters to the user\n", size_of_message);
-      return (size_of_message=0);  // clear the position to the start and return 0
-   }
-   else {
-      printk(KERN_INFO "charbuff: Failed to send %d characters to the user\n", error_count);
-      return -EFAULT;              // Failed -- return a bad address message (i.e. -14)
-   }
-}
+//    if (error_count==0){            // if true then have success
+//       printk(KERN_INFO "charbuff: Sent %d characters to the user\n", size_of_message);
+//       return (size_of_message=0);  // clear the position to the start and return 0
+//    }
+//    else {
+//       printk(KERN_INFO "charbuff: Failed to send %d characters to the user\n", error_count);
+//       return -EFAULT;              // Failed -- return a bad address message (i.e. -14)
+//    }
+// }
 
 /** @brief This function is called whenever the device is being written to from user space i.e.
  *  data is sent to the device from the user. The data is copied to the message[] array in this
