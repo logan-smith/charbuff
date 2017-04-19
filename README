@@ -1,0 +1,3 @@
+1. Make
+2. sudo insmod charbuffin.ko
+3. sudo insmod charbuffout.ko
